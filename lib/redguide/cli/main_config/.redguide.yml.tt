@@ -1,0 +1,6 @@
+# RedGude Main config file
+server: "<%= config[:server] %>"
+user: "<%=  config[:user] %>"
+password: "<%= config[:password] %>"
+# project: "YOU CAN SPECIFY DEFAULT PROJECT HERE"
+

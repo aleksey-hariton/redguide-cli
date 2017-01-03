@@ -1,0 +1,5 @@
+# RedGude changeset config file
+server: "<%= config[:server] %>"
+project: "<%= config[:project] %>"
+changeset: "<%= config[:key] %>"
+
