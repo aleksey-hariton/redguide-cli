@@ -155,12 +155,14 @@ module Redguide
 
                   cookbooks.each do |c|
                     next if c[:name] == cookbook
+                    comment_lines berksfile, /cookbook\s+['"]#{c[:name]}['"].*/
                     append_to_file berksfile, "cookbook '#{c[:name]}', path: '#{c[:path]}'\n"
                   end
                 else
                   changeset.cookbook_builds.each do |build|
                     next if build.name == cookbook
                     sha = build.commit_sha.empty? ? 'master' : build.commit_sha
+                    comment_lines berksfile, /cookbook\s+['"]#{build.name}['"].*/
                     append_to_file berksfile, "cookbook '#{build.name}', git: '#{build.vcs_url}', ref: '#{sha}'\n"
                   end
                 end
