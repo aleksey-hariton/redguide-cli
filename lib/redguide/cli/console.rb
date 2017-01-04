@@ -168,7 +168,6 @@ module Redguide
                 end
               end
 
-              system("cat #{berksfile}")
               statuses['Kitchen'] = CLI::Test.kitchen
               say "====> No Kitchen config, skipping...\n\n\n", :cyan if statuses['Kitchen'] == Redguide::API::STATUS_SKIPPED
               changeset.notify_cookbook(cookbook, 'kitchen', statuses['Kitchen']) if notify

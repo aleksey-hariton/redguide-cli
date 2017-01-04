@@ -24,9 +24,24 @@ module Redguide
       end
 
       def self.kitchen
-        if File.exists?('.kitchen.yml')
-          status = system('kitchen converge') && system('kitchen verify')
-          status ? Redguide::API::STATUS_OK : Redguide::API::STATUS_NOK
+        kitchen_yml_file = '.kitchen.yml'
+        if File.exists?(kitchen_yml_file)
+          # Check if the cookbook has multi node testing or not and if no then start 2-step converge for proper environment preparation
+          yml_config = YAML.load_file(kitchen_yml_file)
+          multi_node = yml_config['provisioner']['multi_node']
+
+          commands = []
+          commands << 'kitchen converge' if multi_node
+          commands << 'kitchen converge'
+          commands << 'kitchen verify'
+
+          # Run commands
+          commands.each do |cmd|
+            return Redguide::API::STATUS_NOK unless system(cmd)
+          end
+
+          # OK
+          Redguide::API::STATUS_OK
         else
           Redguide::API::STATUS_SKIPPED
         end
