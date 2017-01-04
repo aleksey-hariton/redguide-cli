@@ -180,9 +180,12 @@ module Redguide
               Redguide::API::STATUS_SKIPPED => "\e[37mSKIPPED\e[0m"
           }
 
+          success = true
           statuses.each do |key, val|
             puts "#{key.rjust(20)} - #{status_strings[val]}"
+            success = false if val == Redguide::API::STATUS_NOK
           end
+          exit 1 unless success
         end
       end
 
@@ -202,7 +205,7 @@ module Redguide
                 cherry = `git cherry`
                 git.push('origin', git.current_branch) unless cherry.empty?
             else
-              abourt 'ERROR: Something went wrong' unless system("git push -u origin '#{git.current_branch}'")
+              abort 'ERROR: Something went wrong' unless system("git push -u origin '#{git.current_branch}'")
             end
           end
           to_push[cookbook] = {}
@@ -212,6 +215,8 @@ module Redguide
 
         changeset = client.project(end_conf['project']).changeset(end_conf['changeset'])
         changeset.push(to_push)
+
+        say "Pushed successfully: #{changeset.url}", :green
       end
 
       desc 'pull [CHANGESET]', 'Pull changeset cookbooks from RedGuide'
