@@ -16,10 +16,10 @@ module Redguide
 
       desc 'changeset SUBCOMMAND ...ARGS', 'Changesets manipulation'
       subcommand 'changeset', Redguide::CLI::Changeset
-      #
-      # desc 'cookbook SUBCOMMAND ...ARGS', 'Changesets manipulation'
-      # subcommand 'cookbook', Redguide::CLI::Cookbook
-      #
+
+      desc 'cookbook SUBCOMMAND ...ARGS', 'Changesets manipulation'
+      subcommand 'cookbook', Redguide::CLI::Cookbook
+
 
       desc 'login', 'Login to RedGuide server and save config'
       option :server, type: :string, required: true
@@ -142,6 +142,8 @@ module Redguide
 
               berksfile = File.join(dir, 'Berksfile')
               if File.exists?(berksfile)
+                # Newlines
+                append_to_file berksfile, "\n\n"
                 if options[:local_cookbooks]
                   search = "#{cookbook_directory}/../*/metadata.rb"
                   cookbooks = Dir[search].map do |d|
