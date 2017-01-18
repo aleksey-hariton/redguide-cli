@@ -4,8 +4,10 @@ require 'redguide/cli/changeset'
 require 'redguide/cli/cookbook'
 require 'redguide/cli/test/test'
 require 'redguide/api'
+require 'redguide/supermarket'
 require 'json'
 require 'git'
+require 'semver'
 
 module Redguide
   module CLI
@@ -17,9 +19,8 @@ module Redguide
       desc 'changeset SUBCOMMAND ...ARGS', 'Changesets manipulation'
       subcommand 'changeset', Redguide::CLI::Changeset
 
-      desc 'cookbook SUBCOMMAND ...ARGS', 'Changesets manipulation'
+      desc 'cookbook SUBCOMMAND ...ARGS', 'Cookbooks manipulation'
       subcommand 'cookbook', Redguide::CLI::Cookbook
-
 
       desc 'login', 'Login to RedGuide server and save config'
       option :server, type: :string, required: true
@@ -73,12 +74,13 @@ module Redguide
         end
       end
 
-
-      desc 'test [all|foodcritic|cookstyle|rspec|kitchen]', 'Test cookbook. Default: all'
+      desc 'build [all|foodcritic|cookstyle|rspec|kitchen]', 'Test cookbook. Default: all'
       option :notify, type: :boolean, default: false, desc: 'Notify RedGuide about status or not'
+      option :publish, type: :boolean, default: false, desc: 'Publish cookbook on Supermarket or not'
       option :local_cookbooks, type: :boolean, default: true, desc: 'Use cookbooks from local changeset. Otherwise use cookbooks from Git (RedGuide).'
-      def test(what = 'all')
+      def build(what = 'all')
         notify = options[:notify]
+        publish = options[:publish]
         rg_config_file = "../#{RG_CONFIG_FILE}"
         if !File.exists?(rg_config_file) && !(ENV['RG_PROJECT'] && ENV['RG_CHANGESET'])
           abort "ERROR: Look like current directory not in changeset, file '../#{RG_CONFIG_FILE}' not found"
@@ -101,8 +103,56 @@ module Redguide
         changeset = project.changeset(changeset_settings['changeset'])
 
         Dir.mktmpdir do |dir|
-          directory cookbook_directory, dir, verbose: false, exclude_pattern: /(\A\.kitchen\/.*|\.git\/.*\z)/
+          # Copy all files from cookbook folder, without `.kitchen` and `.git` (if not publish flag set)
+          pattern = publish ? '(\A\.kitchen\/.*\z)' : '(\A\.kitchen\/.*|\.git\/.*\z)'
+          directory cookbook_directory, dir, verbose: false, exclude_pattern: /#{pattern}/
+
+          # Merge master before build, if user wants to publish cookbook
+          if publish
+
+            #### STEP 1. Merge 'master'
+            #
+            git = Git.open(dir)
+            # changeset.merge_pr
+            git.pull('origin', 'master')
+
+            # Read metadata.rb
+            metadata_path = 'metadata.rb'
+            metadata = File.read(metadata_path)
+
+            # Extract cookbook version
+            version_regex = /^version\s+['"]{1}+([0-9\.]+)['"]{1}/
+            version_string = metadata.match(version_regex)[0]
+            version = metadata.match(version_regex)[1]
+
+            #### STEP 2. Check Supermarket for released version
+            #
+            supermarket_config = project.supermarket_config
+            Redguide::Supermarket::server = supermarket_config[:url]
+
+            # Calculate new cookbook version
+            v = SemVer.parse(version)
+            v.patch += 1
+            new_version = v.to_s.delete('v')
+
+            super_cookbook = Redguide::Supermarket::Client.new().cookbook(cookbook)
+
+            #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! CHECK THAT Git HAS CHANGES if DOESNT CHECK IF DOESN'T
+            # DO GIT CHERRY AND CHECK IF CHANGES PUSHED?
+            # IF NOT TAG AND PUSH
+
+            if super_cookbook
+              if super_cookbook.versions.include?(new_version)
+                abort "ERROR: Cookbook version '#{new_version}' already released on Supermarket - '#{super_cookbook.url(new_version)}'"
+              end
+            else
+              say "Looks like it first release of '#{cookbook}', no versions found", :blue
+            end
+          end
+          # END publish
+
           statuses = {}
+          success = true
 
           Dir.chdir dir do
             fc_config = File.join(dir, '.foodcritic')
@@ -110,10 +160,12 @@ module Redguide
             kitchen_config = File.join(dir, '.kitchen.yml')
             kitchen_local_config = File.join(dir, '.kitchen.local.yml')
 
+            # Write down config files
             File.write(fc_config, project.config(:foodcritic)) unless ::File.exists?(fc_config)
             File.write(cs_config, project.config(:cookstyle)) unless ::File.exists?(cs_config)
             File.write(kitchen_local_config, project.config(:kitchen)) if ::File.exists?(kitchen_config)
 
+            # FoodCritic
             if ['all', 'foodcritic'].include?(what)
               say "\n\n====> Starting FoodCritic...\n\n\n", :green
               changeset.notify_cookbook(cookbook, 'foodcritic', Redguide::API::STATUS_IN_PROGRESS) if notify
@@ -121,6 +173,7 @@ module Redguide
               changeset.notify_cookbook(cookbook, 'foodcritic', statuses['FoodCritic']) if notify
             end
 
+            # CookStyle
             if ['all', 'cookstyle'].include?(what)
               say "\n\n====> Starting CookStyle...\n\n\n", :green
               changeset.notify_cookbook(cookbook, 'cookstyle', Redguide::API::STATUS_IN_PROGRESS) if notify
@@ -128,6 +181,7 @@ module Redguide
               changeset.notify_cookbook(cookbook, 'cookstyle', statuses['CookStyle']) if notify
             end
 
+            # RSpec, ChefSpec
             if ['all', 'rspec'].include?(what)
               say "\n\n====> Starting RSpec...\n\n\n", :green
               changeset.notify_cookbook(cookbook, 'rspec', Redguide::API::STATUS_IN_PROGRESS) if notify
@@ -136,6 +190,7 @@ module Redguide
               changeset.notify_cookbook(cookbook, 'rspec', statuses['RSpec']) if notify
             end
 
+            # Kitchen
             if ['all', 'kitchen'].include?(what)
               say "\n\n====> Starting Kitchen...\n\n\n", :green
               changeset.notify_cookbook(cookbook, 'kitchen', Redguide::API::STATUS_IN_PROGRESS) if notify
@@ -172,19 +227,77 @@ module Redguide
               say "====> No Kitchen config, skipping...\n\n\n", :cyan if statuses['Kitchen'] == Redguide::API::STATUS_SKIPPED
               changeset.notify_cookbook(cookbook, 'kitchen', statuses['Kitchen']) if notify
             end
+
+            status_strings = {
+                Redguide::API::STATUS_OK => "\e[32mOK\e[0m",
+                Redguide::API::STATUS_NOK => "\e[31mFAILED\e[0m",
+                Redguide::API::STATUS_SKIPPED => "\e[37mSKIPPED\e[0m"
+            }
+
+            statuses.each do |key, val|
+              puts "#{key.rjust(20)} - #{status_strings[val]}"
+              success = false if val == Redguide::API::STATUS_NOK
+            end
+
+            # Publish
+            if publish
+              if success
+
+                if `git cherry`.empty?
+                  say('No new commits found, nothing to release', :red)
+                  abort
+                end
+
+                #### STEP 3. Version bump
+                #
+                say "Original cookbook version: '#{version}', new cookbook version: '#{new_version}'", :green
+                metadata.gsub!(version_string) do |line|
+                  line.gsub(version, new_version)
+                end
+
+                say 'Updating metadata.rb file', :green
+                File.open(metadata_path, 'w') do |f|
+                  f.write(metadata)
+                end
+
+                #### STEP 4. Generate CHANGELOG.md
+                #
+                if `which git-changelog`.strip.empty?
+                  say "Cant find 'git-changelog', skipping CHANGELOG.md generation", :yellow
+                else
+                  say 'Generating CHANGELOG.md', :green
+                  system("git-changelog -a -x -n -t #{new_version} -p > ./CHANGELOG.md")
+                  git.add('CHANGELOG.md')
+                end
+
+                #### STEP 5. Git TAG
+                #
+                git.add('metadata.rb')
+                say 'Commiting CHANGELOG.md and metadata.rb', :green
+                git.commit("Version bump to v#{new_version}")
+                # git tag
+                say "Tagging to #{new_version}", :green
+                commit_id = git.add_tag(new_version).sha
+
+                #### STEP 6. PUSH
+                #
+                say "Git push to origin remote (commit '#{commit_id}')", :green
+                # git push origin `git rev-list -n 1 $NEW_VERSION`:$DST_BRANCH
+                git.push(git.remote('origin'), "#{commit_id}:master", tags: true)
+
+                #### STEP 7. Publish to Supermarket
+                #
+                File.write("#{project.chef_user}.pem", project.chef_user_pem)
+                system "stove --endpoint '#{Redguide::Supermarket::endpoint}' --username '#{project.chef_user}' --key './#{project.chef_user}.pem' --extended-metadata --no-git"
+
+                abort 'THE END!'
+              else
+                say 'Cookbook build failed, publishing skipped', :red
+              end
+            end
+            ## END publish
           end
 
-          status_strings = {
-              Redguide::API::STATUS_OK => "\e[32mOK\e[0m",
-              Redguide::API::STATUS_NOK => "\e[31mFAILED\e[0m",
-              Redguide::API::STATUS_SKIPPED => "\e[37mSKIPPED\e[0m"
-          }
-
-          success = true
-          statuses.each do |key, val|
-            puts "#{key.rjust(20)} - #{status_strings[val]}"
-            success = false if val == Redguide::API::STATUS_NOK
-          end
           exit 1 unless success
         end
       end
@@ -262,9 +375,7 @@ module Redguide
 
           git.pull('origin', cookbook_branch) if remote_branch
         end
-
       end
-
     end
   end
 end
