@@ -243,7 +243,7 @@ module Redguide
             if publish
               if success
 
-                if `git cherry`.empty?
+                if `git cherry origin`.empty?
                   say('No new commits found, nothing to release', :red)
                   abort
                 end
@@ -315,7 +315,7 @@ module Redguide
           remote_branches = git.branches.remote.select{|b| b.name == git.current_branch}.first
           Dir.chdir(cookbook) do
             if remote_branches
-                cherry = `git cherry`
+                cherry = `git cherry origin`
                 git.push('origin', git.current_branch) unless cherry.empty?
             else
               abort 'ERROR: Something went wrong' unless system("git push -u origin '#{git.current_branch}'")
