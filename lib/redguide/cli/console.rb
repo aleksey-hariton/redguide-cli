@@ -2,6 +2,7 @@ require 'redguide/cli/base'
 require 'redguide/cli/project'
 require 'redguide/cli/changeset'
 require 'redguide/cli/cookbook'
+require 'redguide/cli/cfg'
 require 'redguide/cli/test/test'
 require 'redguide/api'
 require 'redguide/supermarket'
@@ -21,6 +22,9 @@ module Redguide
 
       desc 'cookbook SUBCOMMAND ...ARGS', 'Cookbooks manipulation'
       subcommand 'cookbook', Redguide::CLI::Cookbook
+
+      desc 'cfg SUBCOMMAND ...ARGS', 'Manage configs on RedGuide'
+      subcommand 'cfg', Redguide::CLI::Cfg
 
       desc 'login', 'Login to RedGuide server and save config'
       option :server, type: :string, required: true
